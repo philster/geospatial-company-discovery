@@ -1,0 +1,33 @@
+{
+  "name": "geospatial-company-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "crawl:companies": "tsx src/crawl/google-maps.ts",
+    "crawl:datasf": "tsx src/crawl/datasf.ts",
+    "crawl:usearch": "tsx src/crawl/usearch.ts",
+    "crawl:enrichment": "tsx src/crawl/enrichment.ts",
+    "process": "tsx src/process/index.ts",
+    "query": "tsx src/query/index.ts",
+    "server": "tsx src/server/index.ts",
+    "dev": "tsx watch src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "dev:frontend": "cd frontend && npm run dev"
+  },
+  "dependencies": {
+    "apify-client": "^2.25.0",
+    "better-sqlite3": "13.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "yargs": "^18.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "@types/yargs": "^17.0.35",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
