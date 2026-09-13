@@ -64,7 +64,6 @@ export interface Company {
   aliases: string | null;
   category: string | null;
   website: string | null;
-  phone: string | null;
   source: string;
   source_id: string | null;
   crawled_at: string;
@@ -90,6 +89,7 @@ export interface CompanyAddress {
   company_id: number;
   address_id: number;
   is_headquarters: boolean;
+  phone: string | null;
   source: string;
   confidence: number;
   crawled_at: string;
@@ -112,6 +112,7 @@ export interface QueryResult {
   address: Address;
   distance_miles: number;
   is_headquarters: boolean;
+  phone: string | null;
   confidence: number;
   attributes: CompanyAttribute[];
 }

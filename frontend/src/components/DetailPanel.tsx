@@ -75,10 +75,10 @@ export function DetailPanel({ result, onClose }: Props) {
         </div>
       )}
 
-      {company.phone && (
+      {result.phone && (
         <div className="field">
           <div className="field-label">Phone</div>
-          <div className="field-value">{company.phone}</div>
+          <div className="field-value">{result.phone}</div>
         </div>
       )}
 

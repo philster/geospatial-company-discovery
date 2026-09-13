@@ -25,7 +25,6 @@ export function queryCompanies(
       c.aliases as company_aliases,
       c.category,
       c.website,
-      c.phone,
       c.source as company_source,
       c.source_id as company_source_id,
       c.crawled_at as company_crawled_at,
@@ -43,6 +42,7 @@ export function queryCompanies(
       a.source_id as address_source_id,
       a.crawled_at as address_crawled_at,
       ca.is_headquarters,
+      ca.phone,
       ca.confidence,
       haversine_distance(?, ?, a.lat, a.lng) as distance_miles
     FROM companies c
@@ -70,7 +70,6 @@ export function queryCompanies(
         aliases: row.company_aliases as string | null,
         category: row.category as string | null,
         website: row.website as string | null,
-        phone: row.phone as string | null,
         source: row.company_source as string,
         source_id: row.company_source_id as string | null,
         crawled_at: row.company_crawled_at as string,
@@ -92,6 +91,7 @@ export function queryCompanies(
       },
       distance_miles: Math.round((row.distance_miles as number) * 100) / 100,
       is_headquarters: Boolean(row.is_headquarters),
+      phone: (row.phone as string | null) || null,
       confidence: row.confidence as number,
       attributes,
     });
@@ -149,7 +149,7 @@ async function main() {
         `"${r.company.canonical_name.replace(/"/g, '""')}"`,
         `"${r.company.category || ''}"`,
         r.company.website || '',
-        r.company.phone || '',
+        r.phone || '',
         `"${r.address.address1.replace(/"/g, '""')}"`,
         r.address.city,
         r.address.state || '',

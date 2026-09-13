@@ -295,7 +295,6 @@ async function main() {
     aliases: string[];
     category: string | null;
     website: string | null;
-    phone: string | null;
     sources: Array<{ source: string; source_id: string | null }>;
     bestConfidence: number;
     addresses: Array<{
@@ -307,6 +306,7 @@ async function main() {
       lng: number;
       source: string;
       source_id: string | null;
+      phone: string | null;
       is_headquarters: boolean;
       confidence: number;
     }>;
@@ -371,7 +371,6 @@ async function main() {
       }
       bestMatch.sources.push({ source: p.source, source_id: p.source_id });
       if (!bestMatch.website && p.website) bestMatch.website = p.website;
-      if (!bestMatch.phone && p.phone) bestMatch.phone = p.phone;
       if (!bestMatch.category && p.category) bestMatch.category = p.category;
       bestMatch.bestConfidence = Math.max(bestMatch.bestConfidence, p.confidence);
 
@@ -388,6 +387,7 @@ async function main() {
           lng: p.lng!,
           source: p.source,
           source_id: p.source_id,
+          phone: p.phone,
           is_headquarters: p.is_headquarters,
           confidence: p.confidence,
         });
@@ -398,7 +398,6 @@ async function main() {
         aliases: [],
         category: p.category,
         website: p.website,
-        phone: p.phone,
         sources: [{ source: p.source, source_id: p.source_id }],
         bestConfidence: p.confidence,
         addresses: p.address
@@ -412,6 +411,7 @@ async function main() {
                 lng: p.lng!,
                 source: p.source,
                 source_id: p.source_id,
+                phone: p.phone,
                 is_headquarters: p.is_headquarters,
                 confidence: p.confidence,
               },
@@ -460,13 +460,13 @@ async function main() {
   `);
 
   const insertCompany = db.prepare(`
-    INSERT INTO companies (canonical_name, aliases, category, website, phone, source, source_id, crawled_at)
-    VALUES (@canonical_name, @aliases, @category, @website, @phone, @source, @source_id, @crawled_at)
+    INSERT INTO companies (canonical_name, aliases, category, website, source, source_id, crawled_at)
+    VALUES (@canonical_name, @aliases, @category, @website, @source, @source_id, @crawled_at)
   `);
 
   const insertCompanyAddress = db.prepare(`
-    INSERT INTO company_addresses (company_id, address_id, is_headquarters, source, confidence, crawled_at)
-    VALUES (@company_id, @address_id, @is_headquarters, @source, @confidence, @crawled_at)
+    INSERT INTO company_addresses (company_id, address_id, is_headquarters, phone, source, confidence, crawled_at)
+    VALUES (@company_id, @address_id, @is_headquarters, @phone, @source, @confidence, @crawled_at)
   `);
 
   const crawledAt = new Date().toISOString();
@@ -479,7 +479,6 @@ async function main() {
         aliases: m.aliases.length > 0 ? JSON.stringify(m.aliases) : null,
         category: m.category,
         website: m.website,
-        phone: m.phone,
         source: primarySource.source,
         source_id: primarySource.source_id,
         crawled_at: crawledAt,
@@ -511,6 +510,7 @@ async function main() {
           company_id: companyId,
           address_id: addrResult.lastInsertRowid,
           is_headquarters: addr.is_headquarters ? 1 : 0,
+          phone: addr.phone,
           source: addr.source,
           confidence: Math.min(addr.confidence + (m.sources.length > 1 ? 0.1 : 0), 1.0),
           crawled_at: crawledAt,
