@@ -207,7 +207,23 @@ function normalizeRow(row: UsearchRow, dataset: string) {
     state: startup ? null : fieldVal(row, 'State') || null,
     zip: startup ? null : fieldVal(row, 'Zip Code') || null,
     country: startup ? null : fieldVal(row, 'Country') || null,
-    website: fieldVal(row, startup ? 'Venture Website' : 'Website') || null,
+    website: (() => {
+      const raw = fieldVal(row, startup ? 'Venture Website' : 'Website');
+      if (!raw) return null;
+      try {
+        const parsed = new URL(raw);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          parsed.protocol = 'https:';
+        }
+        return parsed.href;
+      } catch {
+        try {
+          return new URL(`https://${raw}`).href;
+        } catch {
+          return raw;
+        }
+      }
+    })(),
     industry: fieldVal(row, 'Industry') || null,
     sub_industry: fieldVal(row, startup ? 'Venture Industry' : 'Sub Industry') || null,
     revenue: fieldVal(row, startup ? 'Venture Revenue' : 'Revenue') || null,
