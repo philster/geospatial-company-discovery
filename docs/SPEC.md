@@ -30,9 +30,10 @@ Data flows through three layers:
 ```text
                         ┌─────────────────────────────┐
                         │       1. RAW ARCHIVE         │
-                        │   (JSON files in data/raw/)  │
-                        │   Full API responses, all    │
-                        │   fields preserved verbatim  │
+                        │   JSON files in data/raw/    │
+                        │   + usearch_raw_crawl table  │
+                        │   Full responses, all fields │
+                        │   preserved verbatim         │
                         └──────────────┬──────────────┘
                                        ↓
                         ┌─────────────────────────────┐
@@ -58,10 +59,12 @@ Data flows through three layers:
                         └─────────────────────────────┘
 ```
 
-**Layer 1 — Raw archive:** full API/crawl responses stored as JSON files
-in `data/raw/{source}/{timestamp}.json`. Preserves every field from every
-source, even fields not currently used. No schema needed. Can re-process
-from raw at any time without re-crawling.
+**Layer 1 — Raw archive:** full API/crawl responses preserved verbatim.
+For Google Maps and DataSF, stored as JSON files in
+`data/raw/{source}/{timestamp}.json`. For Usearch, stored in the
+`usearch_raw_crawl` SQLite table (keyed by dataset + row hash).
+Preserves every field from every source, even fields not currently used.
+Can re-process from raw at any time without re-crawling.
 
 **Layer 2 — Staging tables:** per-source SQLite tables that extract the
 fields needed for cross-referencing and dedup. Schema is source-specific
@@ -104,9 +107,17 @@ Crawl commands fetch from external sources → write raw JSON to
   approaching the monthly free-tier limit (~1,000 places).
 - `npm run crawl:datasf` — downloads DataSF "Registered Business
   Locations" dataset into `staging_datasf`.
-- `npm run crawl:usearch` — crawls the Usearch software company dataset
-  into `staging_usearch`. Supports `--sf`, `--state`, `--city`,
-  `--dataset`, `--max-pages`. No filter = full US crawl (~47k records).
+- `npm run crawl:usearch` — crawls Usearch company datasets (130+
+  industry/vertical datasets, not just software) into
+  `usearch_raw_crawl` (raw) and then `staging_usearch` (normalized).
+  Two-phase operation:
+  - `npm run crawl:usearch -- --dataset <slug>` fetches a specific
+    dataset (e.g. `software-companies`, `ai-startups`,
+    `fintech-startups`) into the `usearch_raw_crawl` table. Accepts
+    `--max-pages` to limit pages fetched.
+  - `npm run crawl:usearch -- --stage` normalizes all raw data into
+    `staging_usearch`. Can also pass `--dataset <slug>` to stage only
+    one dataset.
 - `npm run crawl:enrichment` — reads companies from staging tables
   (google_maps, usearch, datasf), scrapes additional data from company
   websites / SEC EDGAR, writes to `staging_enrichment`.
@@ -126,11 +137,18 @@ npm run process -- --source google_maps   # process only one source
 ```
 
 Steps:
-1. Deduplicate companies across sources by address + name similarity
-2. Cross-reference Google Maps results against DataSF (for SF locations)
-3. Geocode Usearch addresses via Census batch geocoder
-4. Merge into production `companies`, `addresses`, `company_addresses`
-5. Apply enrichment data to `company_attributes`
+1. Collect all records from staging tables (Google Maps, DataSF, Usearch)
+2. Geocode records missing coordinates via Census batch geocoder, with
+   Nominatim fallback for up to 50 remaining unresolved addresses
+3. Deduplicate companies across sources by name similarity, website match,
+   and address similarity
+4. Cross-reference Google Maps results against DataSF (for SF locations) —
+   companies confirmed by both sources get a confidence boost
+5. Write merged results to production `companies`, `addresses`,
+   `company_addresses`
+6. Apply enrichment data from `staging_enrichment` to `company_attributes`
+7. Attach Usearch revenue/employee_count directly from `staging_usearch`
+   to `company_attributes`
 
 Can re-run at any time without re-crawling — reads from staging tables
 and raw archives.
@@ -145,9 +163,10 @@ npm run query -- --lat 37.77 --lng -122.42 --radius 3
 npm run query -- --lat 37.77 --lng -122.42 --radius 5 --format csv
 ```
 
-Accepts: `--location <address>` or `--lat/--lng`, `--radius <miles>`,
-`--format json|csv` (default: json). Queries SpatiaLite directly and
-outputs a list of matched addresses/companies with enrichment data.
+Accepts: `--location <address>` or `--lat/--lng`, `--radius <miles>`
+(default: 5), `--format json|csv` (default: json). Queries production
+tables using the `haversine_distance` UDF and outputs matched
+companies with address and enrichment data.
 
 ### Query API
 
@@ -157,6 +176,13 @@ GET /api/query?lat=37.77&lng=-122.42&radius_miles=5
 ```
 
 Also accepts `?location=<name>&radius_miles=5` (geocoded server-side).
+
+```text
+GET /api/stats
+  → { companies, addresses, attributes }
+```
+
+Returns row counts for production tables.
 
 ## Scope for this build
 
@@ -185,7 +211,7 @@ One-shot implementation covering:
 |---|---|---|
 | Company discovery (primary) | **Apify Google Maps Extractor** (`compass/google-maps-extractor`, actor ID `nwua9Gu5YrADL7ZDj`) | Returns company name, address, coordinates, category, website, phone. Free tier: ~1,000 places/month ($5 credit). Use via Apify JS SDK (`apify-client`). See [data quality notes](#google-maps-data-quality) below. |
 | Cross-reference / validation (SF) | **DataSF "Registered Business Locations" open dataset** | Free, authoritative, regularly updated — company name + exact address + industry code. Important for validating Google Maps results and catching real businesses that Google Maps misses. SF-specific. |
-| Software companies | **Usearch.com** unauthenticated JSON API (`software-companies` dataset) | ~47k US software companies with HQ address, industry, revenue, employees, website. Coverage comparison with Google Maps is pending (see deferred decision). |
+| Company discovery (multi-industry) | **Usearch.com** unauthenticated JSON API (130+ datasets by industry/vertical) | Datasets cover AI, fintech, biotech, SaaS, manufacturing, retail, and many more verticals — not just software. Each dataset provides HQ address, industry, sub-industry, revenue, employees, website, phone, NAICS/SIC codes, LinkedIn URL. Coverage comparison with Google Maps is pending (see deferred decision). |
 | Geocoding (free-text location input) | Nominatim (OSM) | Rate-limited (~1 req/sec) per its usage policy; used for user-entered search locations and CLI --location args, not bulk lookups. |
 | Geocoding (bulk address resolution) | **US Census Bureau batch geocoder** | Free, no auth, up to 10k addresses per request. Used to geocode Usearch company HQ addresses. |
 | Company enrichment | Google Maps metadata (already captured during crawl) + conservative scraping: company's own website, SEC EDGAR (public companies only) | Google Maps provides website and phone out of the box — reduces the need for separate scraping. LinkedIn and other scraper-hostile sites are explicitly **excluded** — see coverage-gap tradeoff below. |
@@ -279,22 +305,44 @@ CREATE TABLE staging_datasf (
   crawled_at    TEXT NOT NULL
 );
 
--- Usearch software company dataset
+-- Usearch company datasets (130+ industry verticals)
 CREATE TABLE staging_usearch (
   id            INTEGER PRIMARY KEY,
-  usearch_id    TEXT UNIQUE,
+  usearch_id    TEXT,
+  dataset       TEXT NOT NULL,         -- friendlyUrl slug, e.g. "software-companies"
   company_name  TEXT NOT NULL,
   address       TEXT,
   city          TEXT,
   state         TEXT,
   zip           TEXT,
+  country       TEXT,
   website       TEXT,
   industry      TEXT,
+  sub_industry  TEXT,
   revenue       TEXT,
   employee_count TEXT,
+  phone_number  TEXT,
+  naics_code    TEXT,
+  sic_code      TEXT,
+  linkedin_url  TEXT,
+  zoominfo_url  TEXT,
+  source_url    TEXT,
+  published_at  TEXT,
   raw_json      TEXT,                  -- full Usearch record as JSON
   crawl_run     TEXT NOT NULL,
-  crawled_at    TEXT NOT NULL
+  crawled_at    TEXT NOT NULL,
+  UNIQUE(dataset, usearch_id)          -- same company can appear in multiple datasets
+);
+
+-- Raw Usearch crawl archive (populated before staging normalization)
+CREATE TABLE usearch_raw_crawl (
+  id            INTEGER PRIMARY KEY,
+  dataset       TEXT NOT NULL,
+  row_hash      TEXT,
+  raw_json      TEXT NOT NULL,
+  crawl_run     TEXT NOT NULL,
+  crawled_at    TEXT NOT NULL,
+  UNIQUE(dataset, row_hash)
 );
 
 -- Enrichment results from website scraping / SEC EDGAR
@@ -351,6 +399,7 @@ CREATE TABLE company_addresses (
   company_id    INTEGER NOT NULL REFERENCES companies(id),
   address_id    INTEGER NOT NULL REFERENCES addresses(id),
   is_headquarters BOOLEAN DEFAULT FALSE,
+  phone         TEXT,
   source        TEXT NOT NULL,
   confidence    REAL NOT NULL,       -- 0.0–1.0
   crawled_at    TEXT NOT NULL,       -- ISO 8601
@@ -388,13 +437,15 @@ CREATE TABLE company_attributes (
 
 ### Stack
 
-- **Frontend:** React + TypeScript + Leaflet (chosen over heavier
+- **Frontend:** React v19 + TypeScript + Leaflet + Vite (chosen over heavier
   WebGL-based map libraries — simpler setup, sufficient for single-user
   scale).
-- **Backend:** Node.js + TypeScript.
-- **Database:** SQLite + SpatiaLite — a single-file, zero-server database
-  that still supports spatial queries, matching the "minimal, local" infra
-  decision below (no Postgres server to run for a single-user tool).
+- **Backend:** Node.js + Express 5 + TypeScript.
+- **Database:** SQLite (via `better-sqlite3`) — a single-file, zero-server
+  database, matching the "minimal, local" infra decision below (no Postgres
+  server to run for a single-user tool). Spatial queries use a custom
+  `haversine_distance` UDF registered at connection time rather than the
+  SpatiaLite extension.
 - **Data ingestion:** CLI scripts (`npm run crawl:*`) fetch from external
   sources into raw JSON archives + staging tables. `npm run process`
   transforms staging data into production tables. Each step runs
@@ -408,7 +459,7 @@ CREATE TABLE company_attributes (
 ```text
 GET /api/query?lat=...&lng=...&radius_miles=...
         ↓
-SpatiaLite spatial query on pre-crawled data
+haversine_distance UDF query on pre-crawled data
         ↓
 { companies, enrichment }
 ```
@@ -421,9 +472,9 @@ no polling — data must be crawled and processed first via CLI.
 - User can specify the search location either by **typing a free-text place
   name/address** (geocoded via Nominatim) **or by clicking a point on the
   map** — both supported.
-- Radius search uses SpatiaLite's spatial functions (equivalent to
-  PostGIS's `ST_DWithin`) rather than manual distance math in application
-  code.
+- Radius search uses a `haversine_distance(lat1, lng1, lat2, lng2)` UDF
+  registered in `better-sqlite3` at connection time. This runs in-process
+  (no SpatiaLite extension needed).
 
 ### Provider abstraction
 
