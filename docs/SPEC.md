@@ -138,16 +138,24 @@ npm run process -- --source google_maps   # process only one source
 
 Steps:
 1. Collect all records from staging tables (Google Maps, DataSF, Usearch)
-2. Geocode records missing coordinates via Census batch geocoder, with
+2. Parse addresses using `vladdress` — splits full address strings into
+   structured components (address1, address2, city, state, zip). Addresses
+   that fail to parse are kept as raw strings with a summary logged
+3. Extract per-record data dates: `published_at` for Usearch,
+   `scrapedAt` from Google Maps `raw_json` (via `json_extract`),
+   `start_date` for DataSF
+4. Geocode records missing coordinates via Census batch geocoder, with
    Nominatim fallback for up to 50 remaining unresolved addresses
-3. Deduplicate companies across sources by name similarity, website match,
+5. Deduplicate companies across sources by name similarity, website match,
    and address similarity
-4. Cross-reference Google Maps results against DataSF (for SF locations) —
+6. Cross-reference Google Maps results against DataSF (for SF locations) —
    companies confirmed by both sources get a confidence boost
-5. Write merged results to production `companies`, `addresses`,
-   `company_addresses`
-6. Apply enrichment data from `staging_enrichment` to `company_attributes`
-7. Attach Usearch revenue/employee_count directly from `staging_usearch`
+7. Write merged results to production `companies`, `addresses`,
+   `company_addresses`. Address rows are shared across companies at the
+   same building (street-level dedup); suite/unit info goes into
+   `company_addresses.address2`
+8. Apply enrichment data from `staging_enrichment` to `company_attributes`
+9. Attach Usearch revenue/employee_count directly from `staging_usearch`
    to `company_attributes`
 
 Can re-run at any time without re-crawling — reads from staging tables
@@ -256,8 +264,10 @@ scraping it violates its ToS and it actively blocks scrapers. Without it:
 ## Provenance model
 
 No external source is treated as ground truth. Every derived fact keeps
-`source`, `source_id`/`source_url`, `crawled_at` timestamp, and
-`confidence` score. Company attributes (revenue, employee count) allow
+`source`, `source_id`/`source_url`, `crawled_at` timestamp (using
+source-specific data dates where available — `published_at` for Usearch,
+`scrapedAt` for Google Maps, `start_date` for DataSF), and `confidence`
+score. Company attributes (revenue, employee count) allow
 multiple observations from different sources/times to coexist rather
 than overwriting — this is what makes revenue-growth tracking possible
 later without a schema change. See [Database schema](#database-schema)
@@ -365,17 +375,16 @@ Normalized, deduplicated data populated by `npm run process`. These are
 the only tables read by the query API, CLI query scripts, and frontend.
 
 ```sql
+-- One row per building/geolocation. Suite/unit info lives in company_addresses.
 CREATE TABLE addresses (
   id            INTEGER PRIMARY KEY,
-  address1      TEXT NOT NULL,       -- full street address, e.g. "415 Mission St"
-  address2      TEXT,                -- suite, unit, floor, building number
-  aliases       TEXT,                -- JSON array, e.g. ["Salesforce Tower"]
+  address1      TEXT NOT NULL,       -- street address, e.g. "415 Mission St"
   city          TEXT NOT NULL,
   state         TEXT,
   zip           TEXT,
   country       TEXT NOT NULL DEFAULT 'US',  -- ISO 3166 Alpha-2
-  lat           REAL NOT NULL,
-  lng           REAL NOT NULL,
+  lat           REAL,                -- nullable; not all addresses geocode successfully
+  lng           REAL,
   source        TEXT NOT NULL,       -- "google_maps", "nominatim", "census"
   source_id     TEXT,                -- external ID (e.g. Google Place ID)
   crawled_at    TEXT NOT NULL        -- ISO 8601
@@ -387,23 +396,24 @@ CREATE TABLE companies (
   aliases       TEXT,                -- JSON array of alternate names
   category      TEXT,                -- primary category or industry
   website       TEXT,
-  phone         TEXT,
   source        TEXT NOT NULL,       -- "google_maps", "usearch", "datasf"
   source_id     TEXT,
   crawled_at    TEXT NOT NULL        -- ISO 8601
 );
 
 -- Many-to-many: company can have multiple offices, address can have
--- multiple companies
+-- multiple companies. address2 (suite/unit/floor) is per-company, not
+-- per-building, so it lives here rather than in addresses.
 CREATE TABLE company_addresses (
+  id            INTEGER PRIMARY KEY,
   company_id    INTEGER NOT NULL REFERENCES companies(id),
   address_id    INTEGER NOT NULL REFERENCES addresses(id),
-  is_headquarters BOOLEAN DEFAULT FALSE,
+  address2      TEXT,                -- suite, unit, floor — company-specific
+  is_headquarters INTEGER DEFAULT 0,
   phone         TEXT,
   source        TEXT NOT NULL,
   confidence    REAL NOT NULL,       -- 0.0–1.0
-  crawled_at    TEXT NOT NULL,       -- ISO 8601
-  PRIMARY KEY (company_id, address_id)
+  crawled_at    TEXT NOT NULL        -- ISO 8601
 );
 
 -- Time-varying, multi-source attributes with provenance.

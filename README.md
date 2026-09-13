@@ -129,14 +129,19 @@ npm run process -- --source google_maps   # process only one source
 What it does, in order:
 
 1. Collects all records from staging tables
-2. Geocodes addresses missing coordinates (Census batch geocoder first,
+2. Parses addresses with `vladdress` into structured components
+   (address1, address2, city, state, zip). Unparseable addresses are
+   kept as raw strings with failures logged
+3. Geocodes addresses missing coordinates (Census batch geocoder first,
    Nominatim fallback for stragglers)
-3. Deduplicates by name similarity, website match, and address proximity
-4. Cross-references Google Maps results against DataSF (companies confirmed
+4. Deduplicates by name similarity, website match, and address proximity.
+   Address rows are shared across companies at the same building;
+   suite/unit info goes into `company_addresses.address2`
+5. Cross-references Google Maps results against DataSF (companies confirmed
    by both sources get a confidence boost)
-5. Writes to production `companies`, `addresses`, `company_addresses`
-6. Applies enrichment attributes from `staging_enrichment`
-7. Attaches revenue and employee count from Usearch staging data
+6. Writes to production `companies`, `addresses`, `company_addresses`
+7. Applies enrichment attributes from `staging_enrichment`
+8. Attaches revenue and employee count from Usearch staging data
 
 You can re-run this at any time without re-crawling. It reads from
 staging tables and raw archives, then rebuilds production tables from
@@ -203,6 +208,7 @@ the map.
 | Backend | Node.js, Express 5, TypeScript |
 | Database | SQLite via better-sqlite3 |
 | Spatial queries | Custom `haversine_distance` UDF (no SpatiaLite) |
+| Address parsing | vladdress |
 | CLI tooling | yargs, tsx |
 | Geocoding | Nominatim (interactive), US Census (bulk) |
 
@@ -259,12 +265,16 @@ the source provides.
 **Production tables** (`companies`, `addresses`, `company_addresses`,
 `company_attributes`) hold the clean, deduplicated output. Only the
 process pipeline writes to these; the query API and frontend only read
-from them.
+from them. The `addresses` table has one row per building/geolocation
+(no suite/unit info); company-specific unit details live in
+`company_addresses.address2`.
 
-Every data point carries `source`, `source_id`, `crawled_at`, and
-`confidence` (0.0-1.0). Company attributes like revenue and employee
-count allow multiple observations from different sources to coexist
-rather than overwriting each other.
+Every data point carries `source`, `source_id`, `crawled_at` (using
+source-specific data dates: `published_at` for Usearch, `scrapedAt`
+for Google Maps, `start_date` for DataSF), and `confidence` (0.0-1.0).
+Company attributes like revenue and employee count allow multiple
+observations from different sources to coexist rather than overwriting
+each other.
 
 
 ## Known limitations

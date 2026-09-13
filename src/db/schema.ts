@@ -76,14 +76,12 @@ export function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS addresses (
       id            INTEGER PRIMARY KEY,
       address1      TEXT NOT NULL,
-      address2      TEXT,
-      aliases       TEXT,
       city          TEXT NOT NULL,
       state         TEXT,
       zip           TEXT,
       country       TEXT NOT NULL DEFAULT 'US',
-      lat           REAL NOT NULL,
-      lng           REAL NOT NULL,
+      lat           REAL,
+      lng           REAL,
       source        TEXT NOT NULL,
       source_id     TEXT,
       crawled_at    TEXT NOT NULL
@@ -101,14 +99,15 @@ export function initSchema(db: Database.Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS company_addresses (
+      id            INTEGER PRIMARY KEY,
       company_id    INTEGER NOT NULL REFERENCES companies(id),
       address_id    INTEGER NOT NULL REFERENCES addresses(id),
+      address2      TEXT,
       is_headquarters INTEGER DEFAULT 0,
       phone         TEXT,
       source        TEXT NOT NULL,
       confidence    REAL NOT NULL,
-      crawled_at    TEXT NOT NULL,
-      PRIMARY KEY (company_id, address_id)
+      crawled_at    TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS company_attributes (

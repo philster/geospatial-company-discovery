@@ -72,22 +72,22 @@ export interface Company {
 export interface Address {
   id: number;
   address1: string;
-  address2: string | null;
-  aliases: string | null;
   city: string;
   state: string | null;
   zip: string | null;
   country: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   source: string;
   source_id: string | null;
   crawled_at: string;
 }
 
 export interface CompanyAddress {
+  id: number;
   company_id: number;
   address_id: number;
+  address2: string | null;
   is_headquarters: boolean;
   phone: string | null;
   source: string;
@@ -110,6 +110,7 @@ export interface CompanyAttribute {
 export interface QueryResult {
   company: Company;
   address: Address;
+  address2: string | null;
   distance_miles: number;
   is_headquarters: boolean;
   phone: string | null;

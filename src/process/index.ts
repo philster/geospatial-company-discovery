@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { parseAddress } from 'vladdress';
 import { getDb, closeDb } from '../db/connection.js';
 import { initSchema } from '../db/schema.js';
 import { geocodeNominatim, batchGeocodeCensus } from '../shared/geocode.js';
@@ -46,53 +47,26 @@ function nameSimilarity(a: string, b: string): number {
   return intersection / Math.max(tokensA.size, tokensB.size);
 }
 
-function parseFullAddress(full: string): {
-  street: string;
-  unit: string;
-  city: string;
-  state: string;
-  zip: string;
-} {
-  const parts = full.split(',').map((s) => s.trim()).filter(Boolean);
-
-  // Parse from the end: last part is "STATE ZIP", second-to-last is city,
-  // everything before is street + unit. This handles multi-comma addresses
-  // like "580 California St, 12th Floor, San Francisco, CA 94104".
-  let state = '';
-  let zip = '';
-  let city = '';
-  let streetParts: string[] = [];
-
-  if (parts.length >= 3) {
-    const last = parts[parts.length - 1];
-    const stateZipMatch = last.match(/^([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
-    if (stateZipMatch) {
-      state = stateZipMatch[1];
-      zip = stateZipMatch[2];
-      city = parts[parts.length - 2];
-      streetParts = parts.slice(0, -2);
-    } else {
-      // No state+zip at end — best-effort: last is city, rest is street
-      city = parts[parts.length - 1];
-      streetParts = parts.slice(0, -1);
+let parseFailures = 0;
+function tryParseAddress(addr: string) {
+  try {
+    return parseAddress(addr);
+  } catch (e) {
+    parseFailures++;
+    if (parseFailures <= 10) {
+      console.warn(`  Address parse failed: "${addr}" — ${(e as Error).message}`);
     }
-  } else if (parts.length === 2) {
-    streetParts = [parts[0]];
-    city = parts[1];
-  } else {
-    streetParts = parts;
+    return null;
   }
+}
 
-  let street = streetParts[0] || '';
-  let unit = streetParts.slice(1).join(', ');
-
-  const unitMatch = street.match(/\s+(#|ste|suite|unit|apt)\s*(\S+)$/i);
-  if (unitMatch) {
-    unit = [unitMatch[0].trim(), unit].filter(Boolean).join(', ');
-    street = street.slice(0, unitMatch.index).trim();
+function parsePublishedAt(raw: string): string {
+  const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match) {
+    const [, m, d, y] = match;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T00:00:00.000Z`;
   }
-
-  return { street, unit, city, state, zip };
+  return raw;
 }
 
 function addressSimilarity(a: string, b: string): number {
@@ -116,7 +90,8 @@ function addressSimilarity(a: string, b: string): number {
 
 interface PendingCompany {
   name: string;
-  address: string | null;
+  address1: string | null;
+  address2: string | null;
   city: string;
   state: string;
   zip: string;
@@ -129,6 +104,7 @@ interface PendingCompany {
   source_id: string | null;
   is_headquarters: boolean;
   confidence: number;
+  data_date: string;
 }
 
 async function main() {
@@ -164,14 +140,15 @@ async function main() {
 
     for (const row of gmRows) {
       const fullAddr = row.address as string | null;
-      const parsed = fullAddr ? parseFullAddress(fullAddr) : null;
+      const parsed = fullAddr ? tryParseAddress(fullAddr) : null;
 
       pending.push({
         name: row.name as string,
-        address: parsed?.street || fullAddr,
-        city: parsed?.city || '',
-        state: parsed?.state || '',
-        zip: parsed?.zip || '',
+        address1: parsed?.addressLine1 || fullAddr,
+        address2: parsed?.addressLine2 || null,
+        city: parsed?.placeName || '',
+        state: parsed?.stateAbbreviation || '',
+        zip: parsed?.zipCode || '',
         lat: row.lat as number | null,
         lng: row.lng as number | null,
         category: row.category as string | null,
@@ -181,6 +158,7 @@ async function main() {
         source_id: row.place_id as string,
         is_headquarters: false,
         confidence: 0.7,
+        data_date: (row.raw_json ? JSON.parse(row.raw_json as string).scrapedAt : null) || (row.crawled_at as string),
       });
     }
   }
@@ -193,9 +171,15 @@ async function main() {
     console.log(`Processing ${dsfRows.length} DataSF entries...`);
 
     for (const row of dsfRows) {
+      const fullAddr = row.address as string | null;
+      const parsed = fullAddr ? tryParseAddress(
+        [fullAddr, (row.city as string) || 'San Francisco', (row.state as string) || 'CA', (row.zip as string) || ''].filter(Boolean).join(', ')
+      ) : null;
+
       pending.push({
         name: row.business_name as string,
-        address: row.address as string | null,
+        address1: parsed?.addressLine1 || fullAddr,
+        address2: parsed?.addressLine2 || null,
         city: (row.city as string) || 'San Francisco',
         state: (row.state as string) || 'CA',
         zip: (row.zip as string) || '',
@@ -208,6 +192,7 @@ async function main() {
         source_id: row.datasf_id as string,
         is_headquarters: false,
         confidence: 0.8,
+        data_date: (row.start_date as string) || (row.crawled_at as string),
       });
     }
   }
@@ -220,12 +205,16 @@ async function main() {
     console.log(`Processing ${usRows.length} Usearch entries...`);
 
     for (const row of usRows) {
+      const rawAddr = row.address as string | null;
+      const parsed = rawAddr ? tryParseAddress(rawAddr) : null;
+
       pending.push({
         name: row.company_name as string,
-        address: row.address as string | null,
-        city: (row.city as string) || '',
-        state: (row.state as string) || '',
-        zip: (row.zip as string) || '',
+        address1: parsed?.addressLine1 || rawAddr,
+        address2: parsed?.addressLine2 || null,
+        city: parsed?.placeName || (row.city as string) || '',
+        state: parsed?.stateAbbreviation || (row.state as string) || '',
+        zip: parsed?.zipCode || (row.zip as string) || '',
         lat: null,
         lng: null,
         category: row.industry as string | null,
@@ -235,16 +224,22 @@ async function main() {
         source_id: row.usearch_id as string | null,
         is_headquarters: true,
         confidence: 0.6,
+        data_date: row.published_at
+          ? parsePublishedAt(row.published_at as string)
+          : (row.crawled_at as string),
       });
     }
   }
 
+  if (parseFailures > 0) {
+    console.log(`  ${parseFailures} addresses failed to parse (kept raw)`);
+  }
   console.log(`Total pending: ${pending.length} records`);
 
   // --- Geocode records missing coordinates ---
 
   const needGeocode = pending.filter(
-    (p) => p.lat === null && p.address && p.city && p.state,
+    (p) => p.lat === null && p.address1 && p.city && p.state,
   );
 
   if (needGeocode.length > 0) {
@@ -252,7 +247,7 @@ async function main() {
 
     const batchInput = needGeocode.map((p, i) => ({
       id: String(i),
-      address: p.address!,
+      address: p.address1!,
       city: p.city,
       state: p.state,
       zip: p.zip,
@@ -275,7 +270,7 @@ async function main() {
         `  Falling back to Nominatim for ${Math.min(stillMissing.length, 50)} remaining...`,
       );
       for (const p of stillMissing.slice(0, 50)) {
-        const query = [p.address, p.city, p.state, p.zip]
+        const query = [p.address1, p.city, p.state, p.zip]
           .filter(Boolean)
           .join(', ');
         const point = await geocodeNominatim(query);
@@ -298,7 +293,8 @@ async function main() {
     sources: Array<{ source: string; source_id: string | null }>;
     bestConfidence: number;
     addresses: Array<{
-      address: string;
+      address1: string;
+      address2: string | null;
       city: string;
       state: string;
       zip: string;
@@ -309,6 +305,7 @@ async function main() {
       phone: string | null;
       is_headquarters: boolean;
       confidence: number;
+      data_date: string;
     }>;
   }
 
@@ -349,7 +346,7 @@ async function main() {
 
       if (nSim >= 0.6) {
         for (const addr of m.addresses) {
-          if (p.address && addressSimilarity(p.address, addr.address) >= 0.5) {
+          if (p.address1 && addressSimilarity(p.address1, addr.address1) >= 0.5) {
             const score = nSim * 0.6 + 0.4;
             if (score > bestScore) {
               bestScore = score;
@@ -375,11 +372,12 @@ async function main() {
       bestMatch.bestConfidence = Math.max(bestMatch.bestConfidence, p.confidence);
 
       const existingAddr = bestMatch.addresses.find(
-        (a) => p.address && addressSimilarity(p.address, a.address) >= 0.7,
+        (a) => p.address1 && addressSimilarity(p.address1, a.address1) >= 0.7,
       );
-      if (!existingAddr && p.address) {
+      if (!existingAddr && p.address1) {
         bestMatch.addresses.push({
-          address: p.address,
+          address1: p.address1,
+          address2: p.address2,
           city: p.city,
           state: p.state,
           zip: p.zip,
@@ -390,6 +388,7 @@ async function main() {
           phone: p.phone,
           is_headquarters: p.is_headquarters,
           confidence: p.confidence,
+          data_date: p.data_date,
         });
       }
     } else {
@@ -400,10 +399,11 @@ async function main() {
         website: p.website,
         sources: [{ source: p.source, source_id: p.source_id }],
         bestConfidence: p.confidence,
-        addresses: p.address
+        addresses: p.address1
           ? [
               {
-                address: p.address,
+                address1: p.address1,
+                address2: p.address2,
                 city: p.city,
                 state: p.state,
                 zip: p.zip,
@@ -414,6 +414,7 @@ async function main() {
                 phone: p.phone,
                 is_headquarters: p.is_headquarters,
                 confidence: p.confidence,
+                data_date: p.data_date,
               },
             ]
           : [],
@@ -455,8 +456,12 @@ async function main() {
   console.log('Writing to production tables...');
 
   const insertAddress = db.prepare(`
-    INSERT INTO addresses (address1, address2, aliases, city, state, zip, country, lat, lng, source, source_id, crawled_at)
-    VALUES (@address1, @address2, @aliases, @city, @state, @zip, 'US', @lat, @lng, @source, @source_id, @crawled_at)
+    INSERT INTO addresses (address1, city, state, zip, country, lat, lng, source, source_id, crawled_at)
+    VALUES (@address1, @city, @state, @zip, 'US', @lat, @lng, @source, @source_id, @crawled_at)
+  `);
+
+  const findAddress = db.prepare(`
+    SELECT id FROM addresses WHERE address1 = @address1 AND city = @city AND state = @state AND zip = @zip
   `);
 
   const insertCompany = db.prepare(`
@@ -465,8 +470,8 @@ async function main() {
   `);
 
   const insertCompanyAddress = db.prepare(`
-    INSERT INTO company_addresses (company_id, address_id, is_headquarters, phone, source, confidence, crawled_at)
-    VALUES (@company_id, @address_id, @is_headquarters, @phone, @source, @confidence, @crawled_at)
+    INSERT INTO company_addresses (company_id, address_id, address2, is_headquarters, phone, source, confidence, crawled_at)
+    VALUES (@company_id, @address_id, @address2, @is_headquarters, @phone, @source, @confidence, @crawled_at)
   `);
 
   const crawledAt = new Date().toISOString();
@@ -474,6 +479,10 @@ async function main() {
   const writeAll = db.transaction(() => {
     for (const m of merged) {
       const primarySource = m.sources[0];
+      const latestDate = m.addresses.reduce(
+        (best, a) => (a.data_date > best ? a.data_date : best),
+        m.addresses[0]?.data_date || crawledAt,
+      );
       const companyResult = insertCompany.run({
         canonical_name: m.name,
         aliases: m.aliases.length > 0 ? JSON.stringify(m.aliases) : null,
@@ -481,39 +490,43 @@ async function main() {
         website: m.website,
         source: primarySource.source,
         source_id: primarySource.source_id,
-        crawled_at: crawledAt,
+        crawled_at: latestDate,
       });
       const companyId = companyResult.lastInsertRowid;
 
       for (const addr of m.addresses) {
-        const parsed = parseFullAddress(
-          [addr.address, addr.city, addr.state, addr.zip]
-            .filter(Boolean)
-            .join(', '),
-        );
+        const addrKey = {
+          address1: addr.address1,
+          city: addr.city,
+          state: addr.state,
+          zip: addr.zip,
+        };
 
-        const addrResult = insertAddress.run({
-          address1: parsed.street || addr.address,
-          address2: parsed.unit || null,
-          aliases: null,
-          city: addr.city || parsed.city,
-          state: addr.state || parsed.state,
-          zip: addr.zip || parsed.zip,
-          lat: addr.lat,
-          lng: addr.lng,
-          source: addr.source,
-          source_id: addr.source_id,
-          crawled_at: crawledAt,
-        });
+        let addressId: number | bigint;
+        const existing = findAddress.get(addrKey) as { id: number } | undefined;
+        if (existing) {
+          addressId = existing.id;
+        } else {
+          const addrResult = insertAddress.run({
+            ...addrKey,
+            lat: addr.lat,
+            lng: addr.lng,
+            source: addr.source,
+            source_id: addr.source_id,
+            crawled_at: addr.data_date,
+          });
+          addressId = addrResult.lastInsertRowid;
+        }
 
         insertCompanyAddress.run({
           company_id: companyId,
-          address_id: addrResult.lastInsertRowid,
+          address_id: addressId,
+          address2: addr.address2 || null,
           is_headquarters: addr.is_headquarters ? 1 : 0,
           phone: addr.phone,
           source: addr.source,
           confidence: Math.min(addr.confidence + (m.sources.length > 1 ? 0.1 : 0), 1.0),
-          crawled_at: crawledAt,
+          crawled_at: addr.data_date,
         });
       }
     }
