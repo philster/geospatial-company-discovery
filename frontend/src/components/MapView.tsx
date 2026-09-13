@@ -5,6 +5,7 @@ import {
   Marker,
   Popup,
   Circle,
+  ScaleControl,
   ZoomControl,
   useMapEvents,
   useMap,
@@ -110,6 +111,7 @@ export function MapView({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
+      <ScaleControl position="topright" metric imperial />
       <ZoomControl position="bottomright" />
       <MapClickHandler onClick={onMapClick} />
       <FitRadiusCircle center={center} radiusMiles={radiusMiles} />
