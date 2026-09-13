@@ -53,7 +53,6 @@ export function initSchema(db: Database.Database): void {
       sic_code      TEXT,
       linkedin_url  TEXT,
       zoominfo_url  TEXT,
-      source_url    TEXT,
       published_at  TEXT,
       raw_json      TEXT,
       crawl_run     TEXT NOT NULL,

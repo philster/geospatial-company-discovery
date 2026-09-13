@@ -336,7 +336,6 @@ CREATE TABLE staging_usearch (
   sic_code      TEXT,
   linkedin_url  TEXT,
   zoominfo_url  TEXT,
-  source_url    TEXT,
   published_at  TEXT,
   raw_json      TEXT,                  -- full Usearch record as JSON
   crawl_run     TEXT NOT NULL,

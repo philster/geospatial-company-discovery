@@ -217,7 +217,6 @@ function normalizeRow(row: UsearchRow, dataset: string) {
     sic_code: startup ? null : fieldVal(row, 'SIC Code') || null,
     linkedin_url: fieldVal(row, startup ? 'Venture LinkedIn' : 'LinkedIn URL') || null,
     zoominfo_url: startup ? null : fieldVal(row, 'ZoomInfo URL') || null,
-    source_url: fieldVal(row, 'Src') || null,
     published_at: fieldVal(row, 'Published Date') || null,
     raw_json: JSON.stringify(row),
   };
@@ -311,12 +310,12 @@ function stageFromRaw(dataset?: string) {
     INSERT INTO staging_usearch (
       usearch_id, dataset, company_name, address, city, state, zip, country,
       website, industry, sub_industry, revenue, employee_count, phone_number,
-      naics_code, sic_code, linkedin_url, zoominfo_url, source_url, published_at,
+      naics_code, sic_code, linkedin_url, zoominfo_url, published_at,
       raw_json, crawl_run, crawled_at
     ) VALUES (
       @usearch_id, @dataset, @company_name, @address, @city, @state, @zip, @country,
       @website, @industry, @sub_industry, @revenue, @employee_count, @phone_number,
-      @naics_code, @sic_code, @linkedin_url, @zoominfo_url, @source_url, @published_at,
+      @naics_code, @sic_code, @linkedin_url, @zoominfo_url, @published_at,
       @raw_json, @crawl_run, @crawled_at
     )
     ON CONFLICT(dataset, usearch_id) DO UPDATE SET
@@ -326,7 +325,7 @@ function stageFromRaw(dataset?: string) {
       revenue = excluded.revenue, employee_count = excluded.employee_count,
       phone_number = excluded.phone_number, naics_code = excluded.naics_code,
       sic_code = excluded.sic_code, linkedin_url = excluded.linkedin_url,
-      zoominfo_url = excluded.zoominfo_url, source_url = excluded.source_url,
+      zoominfo_url = excluded.zoominfo_url,
       published_at = excluded.published_at,
       raw_json = excluded.raw_json, crawl_run = excluded.crawl_run, crawled_at = excluded.crawled_at
   `);
