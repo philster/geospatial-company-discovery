@@ -70,12 +70,14 @@ source-specific unique IDs without duplicating or wiping previous data.
 ### Google Maps (via Apify)
 
 ```bash
-npm run crawl:companies -- --location "San Francisco, CA" --radius 5
-npm run crawl:companies -- --lat 37.77 --lng -122.42 --radius 3
+npm run crawl:google-maps -- --location "San Francisco, CA" --radius 5
+npm run crawl:google-maps -- --lat 37.77 --lng -122.42 --radius 3
+npm run crawl:google-maps -- --lat 37.78 --lng -122.41 --radius 5 --max-results 500
 ```
 
-Searches five category terms (software companies, tech companies,
-computer software company, technology company, IT company). Logs Apify
+Searches five exact Google Business Profile categories (software company,
+computer support and services, computer consultant, computer security
+service, automation company). Default 500 results per term. Logs Apify
 credit usage and warns when approaching the monthly free-tier limit.
 
 ### DataSF business registry
@@ -283,10 +285,11 @@ Google Maps returns ~30-40% noise from SEO and virtual-address
 businesses. The process step cross-references against DataSF to catch
 some of this, but filtering isn't perfect.
 
-Major companies (Salesforce, Stripe, Airbnb) often don't appear for
-"software companies" because Google categorizes them differently. The
-crawler searches five category terms to partially address this, but
-coverage gaps remain.
+Search terms match exact Google Business Profile categories for high
+precision (~94% of results are relevant tech/IT companies), but this
+excludes non-tech companies that employ software engineers. About 6%
+noise from adjacent categories (hardware stores, phone repair shops)
+bleeds in and can be filtered during processing.
 
 Employee count and revenue for private companies are mostly unavailable.
 LinkedIn has this data but scraping it violates its ToS, so it's

@@ -14,11 +14,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ACTOR_ID = 'nwua9Gu5YrADL7ZDj';
 
 const SEARCH_TERMS = [
-  'software companies',
-  'tech companies',
-  'computer software company',
-  'technology company',
-  'IT company',
+  'software company',
+  'computer support and services',
+  'computer consultant',
+  'computer security service',
+  'automation company',
 ];
 
 async function main() {
@@ -29,7 +29,7 @@ async function main() {
     .option('radius', { type: 'number', default: 5, describe: 'Radius in miles' })
     .option('max-results', {
       type: 'number',
-      default: 100,
+      default: 500,
       describe: 'Max results per search term',
     })
     .check((a) => {

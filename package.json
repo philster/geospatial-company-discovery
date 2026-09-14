@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "crawl:companies": "tsx src/crawl/google-maps.ts",
+    "crawl:google-maps": "tsx src/crawl/google-maps.ts",
     "crawl:datasf": "tsx src/crawl/datasf.ts",
     "crawl:usearch": "tsx src/crawl/usearch.ts",
     "crawl:enrichment": "tsx src/crawl/enrichment.ts",

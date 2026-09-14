@@ -100,11 +100,14 @@ independently runnable:
 Crawl commands fetch from external sources → write raw JSON to
 `data/raw/{source}/{timestamp}.json` → populate staging tables.
 
-- `npm run crawl:companies -- --location "San Francisco, CA" --radius 5`
+- `npm run crawl:google-maps -- --location "San Francisco, CA" --radius 5`
   — runs Apify Google Maps Extractor for the area. Accepts
   `--location <name>` (geocoded via Nominatim) or `--lat <lat> --lng <lng>`
-  plus `--radius <miles>`. Budget-aware: logs credit usage and warns when
-  approaching the monthly free-tier limit (~1,000 places).
+  plus `--radius <miles>` and `--max-results <n>` (default 500 per term).
+  Searches exact Google Business Profile categories: software company,
+  computer support and services, computer consultant, computer security
+  service, automation company. Budget-aware: logs credit usage and warns
+  when approaching the monthly free-tier limit (~1,000 places).
 - `npm run crawl:datasf` — downloads DataSF "Registered Business
   Locations" dataset into `staging_datasf`.
 - `npm run crawl:usearch` — crawls Usearch company datasets (130+
@@ -236,15 +239,14 @@ A test crawl of 50 "software companies" in SF Financial District revealed:
   `process` step should flag or filter these (e.g., by cross-referencing
   against DataSF, checking for duplicate addresses shared by many
   unrelated businesses, or detecting SEO-stuffed names).
-- **Major companies missing.** Salesforce, Stripe, Airbnb, Dropbox, etc.
-  are not returned for "software companies" — Google Maps categorizes
-  them differently (e.g., "Computer software company" vs. "Software
-  company"). Multiple search terms or broader category searches may be
-  needed.
-- **Category coverage is narrow.** Google Maps category filtering only
-  catches self-categorized tech companies, not non-tech companies that
-  hire tech workers (banks, healthcare, retail with engineering teams).
-  DataSF cross-referencing partially addresses this gap.
+- **~6% noise from non-software categories** bleeding into results
+  (hardware stores, cell phone repair, shipping services). Filterable
+  by primary GBP category during processing.
+- **Category coverage is intentionally high-precision.** Search terms
+  match exact Google Business Profile primary categories. This catches
+  self-categorized tech/IT companies but excludes non-tech companies
+  that hire software engineers (banks, healthcare, retail). DataSF
+  cross-referencing partially addresses this gap.
 
 ### Enrichment coverage gap
 
